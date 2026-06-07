@@ -47,11 +47,10 @@ def generate(
     prompt_len = inputs["input_ids"].shape[1]
 
     # ── 2. Set up constrained decoding ────────────────────────────────────────
-    # GrammarMatcher wraps the compiled grammar and tracks the current
-    # grammar state. It's called by XGrammar's logits processor at every
-    # decoding step to zero-out token IDs that would violate the grammar.
+    # LogitsProcessor now takes CompiledGrammar directly and manages
+    # the GrammarMatcher internally — no need to create one manually.
     xgr_processor = xgr.contrib.hf.LogitsProcessor(compiled_grammar)
-    
+
     # ── 3. Generate ───────────────────────────────────────────────────────────
     with torch.no_grad():
         output_ids = bundle.model.generate(
@@ -61,7 +60,7 @@ def generate(
             top_p=top_p,
             do_sample=do_sample,
             logits_processor=LogitsProcessorList([xgr_processor]),
-            pad_token_id=bundle.tokenizer.pad_token_id,
+            pad_token_id=getattr(bundle.tokenizer, "tokenizer", bundle.tokenizer).pad_token_id,
         )
 
     # ── 4. Decode new tokens only ─────────────────────────────────────────────

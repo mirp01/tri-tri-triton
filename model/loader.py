@@ -30,17 +30,24 @@ class ModelBundle:
     ) -> ModelBundle:
         model.eval()
 
+        # Get the underlying tokenizer from the processor
         tok = getattr(processor, "tokenizer", processor)
         if tok.pad_token is None:
             tok.pad_token    = tok.eos_token
             tok.pad_token_id = tok.eos_token_id
+
+        # len(tok) gives the full vocab including special tokens —
+        # this is what XGrammar needs to build token masks.
+        # More reliable than model.config.vocab_size, which Gemma 4
+        # stores in a nested text_config instead of at the top level.
+        vocab_size = len(tok)
 
         device = next(model.parameters()).device
 
         return cls(
             model=model,
             tokenizer=processor,
-            vocab_size=_get_vocab_size(model),
+            vocab_size=vocab_size,
             device=device,
         )
 
@@ -59,6 +66,8 @@ class ModelBundle:
             tok.pad_token    = tok.eos_token
             tok.pad_token_id = tok.eos_token_id
 
+        vocab_size = len(tok)
+
         print(f"Loading model: {model_id} ({dtype}, device_map={device_map})")
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
@@ -72,27 +81,6 @@ class ModelBundle:
         return cls(
             model=model,
             tokenizer=processor,
-            vocab_size=_get_vocab_size(model),
+            vocab_size=vocab_size,
             device=device,
         )
-
-
-def _get_vocab_size(model: PreTrainedModel) -> int:
-    """
-    Safely read vocab_size from a model config.
-
-    Standard models (GPT-2, Llama, etc.) store it at model.config.vocab_size.
-    Gemma 4 and other multimodal models store it one level deeper at
-    model.config.text_config.vocab_size.
-    If neither exists, fall back to the embedding weight shape — this is
-    always accurate because the embedding matrix IS the vocabulary.
-    """
-    if hasattr(model.config, "vocab_size"):
-        return model.config.vocab_size
-
-    text_cfg = getattr(model.config, "text_config", None)
-    if text_cfg is not None and hasattr(text_cfg, "vocab_size"):
-        return text_cfg.vocab_size
-
-    # Final fallback: embedding weight shape[0] == vocab_size by definition
-    return model.get_input_embeddings().weight.shape[0]

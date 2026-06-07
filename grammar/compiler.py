@@ -53,8 +53,10 @@ def load_compiled_grammar(
     # vocab_size comes from bundle.vocab_size (i.e. model.config.vocab_size),
     # not len(tokenizer) — special tokens can inflate the tokenizer count
     # and silently break the token masks.
+    tok = getattr(bundle.tokenizer, "tokenizer", bundle.tokenizer)
+    
     tokenizer_info = xgr.TokenizerInfo.from_huggingface(
-        bundle.tokenizer,
+        tok,
         vocab_size=bundle.vocab_size,
     )
 

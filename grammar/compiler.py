@@ -42,7 +42,7 @@ def load_compiled_grammar(
 
     # --- Step 2: Parse into an XGrammar Grammar object ---
     try:
-        grammar = xgr.Grammar.from_ebnf_string(ebnf_string)
+        grammar = xgr.Grammar.from_ebnf(ebnf_string)
     except Exception as e:
         raise ValueError(
             f"Failed to parse triton.ebnf — check your EBNF syntax.\n"

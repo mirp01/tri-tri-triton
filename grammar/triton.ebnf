@@ -1,4 +1,3 @@
-TRITON_GRAMMAR = r"""
 root ::= imports newline+ kernel_function
 
 imports ::= "import triton" newline "import triton.language as tl" newline
@@ -33,4 +32,3 @@ number      ::= [0-9]+
 indent      ::= "    "
 newline     ::= "\n"
 ws          ::= " "*
-"""

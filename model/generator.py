@@ -39,8 +39,8 @@ def generate(
 
     # ── 1. Tokenize prompt ────────────────────────────────────────────────────
     inputs = bundle.tokenizer(
-        prompt,
-        return_tensors="pt",
+        text=prompt,           # must be a keyword arg — Gemma4Processor's
+        return_tensors="pt",   # first positional arg is `images`, not `text`
         return_attention_mask=True,
     ).to(bundle.device)
 

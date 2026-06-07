@@ -7,18 +7,8 @@ from transformers import AutoProcessor, AutoModelForCausalLM, PreTrainedModel
 
 @dataclass
 class ModelBundle:
-    """
-    Holds the model and processor together so they're always passed as a
-    single object.
-
-    Gemma 4 uses AutoProcessor (not AutoTokenizer) — it bundles the chat
-    template and handles text formatting. We store it as `tokenizer` so
-    the rest of the pipeline (generator.py, templates.py) doesn't need
-    to know the difference.
-    """
-
     model:      PreTrainedModel
-    tokenizer:  object          # AutoProcessor for Gemma 4
+    tokenizer:  object
     vocab_size: int
     device:     torch.device
 
@@ -32,31 +22,14 @@ class ModelBundle:
             f"dtype={dtype})"
         )
 
-    # ------------------------------------------------------------------
-    # Primary path — model + processor already loaded in Colab
-    # ------------------------------------------------------------------
-
     @classmethod
     def from_existing(
         cls,
         model:     PreTrainedModel,
         processor: object,
     ) -> ModelBundle:
-        """
-        Wrap a model + processor that are already in memory.
-
-        In Colab where Gemma 4 is already loaded:
-
-            bundle = ModelBundle.from_existing(model, processor)
-
-        Works with both AutoProcessor (Gemma 4) and AutoTokenizer
-        (any other model or the proxy tokenizer used in tests).
-        """
         model.eval()
 
-        # AutoProcessor wraps an underlying tokenizer.
-        # Pad token must be set on that inner tokenizer, not on the
-        # processor itself, or generation will error on batched inputs.
         tok = getattr(processor, "tokenizer", processor)
         if tok.pad_token is None:
             tok.pad_token    = tok.eos_token
@@ -67,13 +40,9 @@ class ModelBundle:
         return cls(
             model=model,
             tokenizer=processor,
-            vocab_size=model.config.vocab_size,
+            vocab_size=_get_vocab_size(model),
             device=device,
         )
-
-    # ------------------------------------------------------------------
-    # Fallback — fresh load outside Colab
-    # ------------------------------------------------------------------
 
     @classmethod
     def load(
@@ -82,10 +51,6 @@ class ModelBundle:
         dtype:      torch.dtype = torch.bfloat16,
         device_map: str         = "auto",
     ) -> ModelBundle:
-        """
-        Load model + processor from HuggingFace from scratch.
-        Use this for fresh sessions or outside Colab.
-        """
         print(f"Loading processor: {model_id}")
         processor = AutoProcessor.from_pretrained(model_id)
 
@@ -107,6 +72,27 @@ class ModelBundle:
         return cls(
             model=model,
             tokenizer=processor,
-            vocab_size=model.config.vocab_size,
+            vocab_size=_get_vocab_size(model),
             device=device,
         )
+
+
+def _get_vocab_size(model: PreTrainedModel) -> int:
+    """
+    Safely read vocab_size from a model config.
+
+    Standard models (GPT-2, Llama, etc.) store it at model.config.vocab_size.
+    Gemma 4 and other multimodal models store it one level deeper at
+    model.config.text_config.vocab_size.
+    If neither exists, fall back to the embedding weight shape — this is
+    always accurate because the embedding matrix IS the vocabulary.
+    """
+    if hasattr(model.config, "vocab_size"):
+        return model.config.vocab_size
+
+    text_cfg = getattr(model.config, "text_config", None)
+    if text_cfg is not None and hasattr(text_cfg, "vocab_size"):
+        return text_cfg.vocab_size
+
+    # Final fallback: embedding weight shape[0] == vocab_size by definition
+    return model.get_input_embeddings().weight.shape[0]

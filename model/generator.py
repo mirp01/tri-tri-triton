@@ -50,9 +50,8 @@ def generate(
     # GrammarMatcher wraps the compiled grammar and tracks the current
     # grammar state. It's called by XGrammar's logits processor at every
     # decoding step to zero-out token IDs that would violate the grammar.
-    matcher = xgr.GrammarMatcher(compiled_grammar)
-    xgr_processor = xgr.contrib.hf.LogitsProcessor(matcher)
-
+    xgr_processor = xgr.contrib.hf.LogitsProcessor(compiled_grammar)
+    
     # ── 3. Generate ───────────────────────────────────────────────────────────
     with torch.no_grad():
         output_ids = bundle.model.generate(

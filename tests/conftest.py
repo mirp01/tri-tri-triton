@@ -1,8 +1,9 @@
 """
-Shared fixtures for both test stages.
+Shared fixtures for all test stages.
 
 Stage 1 (no SLM): uses _MockModel + proxy_tokenizer
 Stage 2 (integration): same fixtures — no Gemma needed yet
+Stage 3 (prompts): uses MINIMAL_CHAT_TEMPLATE constant
 """
 
 import pytest
@@ -10,16 +11,23 @@ import torch
 from transformers import AutoTokenizer
 from model.loader import ModelBundle
 
-# GPT-2 is the lightest tokenizer available — ~5MB, no model download needed.
-# It's only a stand-in for Gemma 4; the tests here care about whether the
-# compilation pipeline runs, not about the specific vocabulary.
 PROXY_TOKENIZER_ID = "gpt2"
+
+# Minimal Jinja2 chat template used in prompt tests.
+# Passed directly to apply_chat_template(chat_template=...) rather than
+# set on the tokenizer object — newer transformers versions don't reliably
+# persist direct attribute assignment on tokenizers like GPT-2.
+MINIMAL_CHAT_TEMPLATE = (
+    "{% for message in messages %}"
+    "{{ message['role'] }}: {{ message['content'] }}\n"
+    "{% endfor %}"
+    "{% if add_generation_prompt %}model: {% endif %}"
+)
 
 
 class _MockModel:
     """
     Minimal model stub — no download, no VRAM.
-
     Only implements the three things ModelBundle.from_existing() actually
     calls: eval(), parameters(), and config.vocab_size.
     """
@@ -31,8 +39,6 @@ class _MockModel:
         return self
 
     def parameters(self):
-        # Generator so each call produces a fresh tensor.
-        # next(model.parameters()).device → cpu
         yield torch.zeros(1)
 
 

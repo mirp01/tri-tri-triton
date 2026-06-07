@@ -33,7 +33,7 @@ class TestEbnfFile:
     def test_file_parses_with_xgrammar(self):
         """XGrammar can parse the EBNF without raising."""
         ebnf = GRAMMAR_PATH.read_text(encoding="utf-8")
-        grammar = xgr.Grammar.from_ebnf_string(ebnf)
+        grammar = xgr.Grammar.from_ebnf(ebnf)
         assert grammar is not None
 
 
@@ -57,3 +57,4 @@ class TestCompiler:
         bad.write_text("this is not valid EBNF !!!@@@###", encoding="utf-8")
         with pytest.raises(ValueError, match="Failed to parse"):
             load_compiled_grammar(stub_bundle, grammar_path=bad)
+            

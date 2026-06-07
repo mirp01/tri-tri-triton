@@ -2,29 +2,25 @@ from __future__ import annotations
 
 import torch
 from dataclasses import dataclass
-from transformers import (
-    AutoTokenizer,
-    AutoModelForCausalLM,
-    PreTrainedModel,
-    PreTrainedTokenizerBase,
-)
+from transformers import AutoProcessor, AutoModelForCausalLM, PreTrainedModel
 
 
 @dataclass
 class ModelBundle:
     """
-    Holds the model and tokenizer together so they're always
-    passed as a single object — no risk of them getting out of sync.
+    Holds the model and processor together so they're always passed as a
+    single object.
 
-    Two ways to create one:
-      - ModelBundle.from_existing(model, tokenizer)  ← Colab: model already loaded
-      - ModelBundle.load(model_id)                   ← fresh load from HuggingFace
+    Gemma 4 uses AutoProcessor (not AutoTokenizer) — it bundles the chat
+    template and handles text formatting. We store it as `tokenizer` so
+    the rest of the pipeline (generator.py, templates.py) doesn't need
+    to know the difference.
     """
 
-    model: PreTrainedModel
-    tokenizer: PreTrainedTokenizerBase
-    vocab_size: int       # model.config.vocab_size, stored here so compiler.py
-    device: torch.device  # doesn't have to reach into the model to get it
+    model:      PreTrainedModel
+    tokenizer:  object          # AutoProcessor for Gemma 4
+    vocab_size: int
+    device:     torch.device
 
     def __repr__(self) -> str:
         dtype = next(self.model.parameters()).dtype
@@ -37,77 +33,66 @@ class ModelBundle:
         )
 
     # ------------------------------------------------------------------
-    # Primary path for your Colab setup
+    # Primary path — model + processor already loaded in Colab
     # ------------------------------------------------------------------
 
     @classmethod
     def from_existing(
         cls,
-        model: PreTrainedModel,
-        tokenizer: PreTrainedTokenizerBase,
+        model:     PreTrainedModel,
+        processor: object,
     ) -> ModelBundle:
         """
-        Wrap a model + tokenizer that are already loaded in memory.
+        Wrap a model + processor that are already in memory.
 
-        Use this in your Colab notebook where Gemma 4 is already in VRAM:
+        In Colab where Gemma 4 is already loaded:
 
-            from model.loader import ModelBundle
-            bundle = ModelBundle.from_existing(model, tokenizer)
+            bundle = ModelBundle.from_existing(model, processor)
 
-        This does NOT reload or move the model — it just packages it
-        alongside metadata that the rest of the pipeline needs.
+        Works with both AutoProcessor (Gemma 4) and AutoTokenizer
+        (any other model or the proxy tokenizer used in tests).
         """
-        model.eval()  # make sure it's in inference mode
+        model.eval()
 
-        # Gemma's tokenizer often ships without a pad token set.
-        # Generation will silently misbehave if this is missing.
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-            tokenizer.pad_token_id = tokenizer.eos_token_id
+        # AutoProcessor wraps an underlying tokenizer.
+        # Pad token must be set on that inner tokenizer, not on the
+        # processor itself, or generation will error on batched inputs.
+        tok = getattr(processor, "tokenizer", processor)
+        if tok.pad_token is None:
+            tok.pad_token    = tok.eos_token
+            tok.pad_token_id = tok.eos_token_id
 
         device = next(model.parameters()).device
 
         return cls(
             model=model,
-            tokenizer=tokenizer,
+            tokenizer=processor,
             vocab_size=model.config.vocab_size,
             device=device,
         )
 
     # ------------------------------------------------------------------
-    # Fallback: fresh load (useful outside Colab or for a clean session)
+    # Fallback — fresh load outside Colab
     # ------------------------------------------------------------------
 
     @classmethod
     def load(
         cls,
-        model_id: str,
-        dtype: torch.dtype = torch.bfloat16,
-        device_map: str = "auto",
+        model_id:   str,
+        dtype:      torch.dtype = torch.bfloat16,
+        device_map: str         = "auto",
     ) -> ModelBundle:
         """
-        Load a model + tokenizer from HuggingFace from scratch.
-
-        Only use this when the model isn't already in memory — for example
-        when running outside Colab or starting a fresh session.
-
-            from model.loader import ModelBundle
-            from config import MODEL_ID
-            bundle = ModelBundle.load(MODEL_ID)
-
-        Args:
-            model_id:   HuggingFace model ID, e.g. "google/gemma-4-2b-it".
-            dtype:      Tensor dtype. bfloat16 is the right choice for Gemma
-                        on modern GPUs — float16 can cause NaNs on some layers.
-            device_map: "auto" lets HuggingFace distribute across available GPUs.
-                        Use "cuda:0" to pin to a single GPU.
+        Load model + processor from HuggingFace from scratch.
+        Use this for fresh sessions or outside Colab.
         """
-        print(f"Loading tokenizer: {model_id}")
-        tokenizer = AutoTokenizer.from_pretrained(model_id)
+        print(f"Loading processor: {model_id}")
+        processor = AutoProcessor.from_pretrained(model_id)
 
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-            tokenizer.pad_token_id = tokenizer.eos_token_id
+        tok = getattr(processor, "tokenizer", processor)
+        if tok.pad_token is None:
+            tok.pad_token    = tok.eos_token
+            tok.pad_token_id = tok.eos_token_id
 
         print(f"Loading model: {model_id} ({dtype}, device_map={device_map})")
         model = AutoModelForCausalLM.from_pretrained(
@@ -117,13 +102,11 @@ class ModelBundle:
         )
         model.eval()
 
-        # When device_map="auto" the model may be spread across devices.
-        # We grab the device of the first parameter as a representative.
         device = next(model.parameters()).device
 
         return cls(
             model=model,
-            tokenizer=tokenizer,
+            tokenizer=processor,
             vocab_size=model.config.vocab_size,
             device=device,
         )
